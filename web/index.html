@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vena — Hand vein analysis</title>
+    <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="%23215F4A"/><path d="M10 26c0-8 6-9 6-18" stroke="%23F6F1E8" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M16 14c4 0 7-3 9-7M16 20c-3 0-6-3-8-6" stroke="%23F6F1E8" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="16" cy="14" r="2" fill="%23E8A06A"/></svg>' />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,520;9..144,600&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="idle">
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="top">
+      <a class="brand" href="#studio" id="brandLink">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <path d="M10 26c0-8 6-9 6-18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+            <path d="M16 14c4 0 7-3 9-7M16 20c-3 0-6-3-8-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <circle cx="16" cy="14" r="2.15" fill="currentColor" />
+          </svg>
+        </span>
+        <div class="brand-copy">
+          <p class="wordmark">Vena</p>
+          <p class="tag">Dorsal hand-vein studio</p>
+        </div>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a class="nav-link is-active" href="#studio" data-page="studio">Studio</a>
+        <a class="nav-link" href="#about" data-page="about">About</a>
+      </nav>
+
+      <div class="top-status">
+        <span class="pill" id="statusPill">Waiting for an image</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="rail" id="rail">
+        <div class="pane-head">
+          <p class="eyebrow">Source</p>
+          <button type="button" class="fold" data-panel="rail" aria-expanded="true" title="Collapse source">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6 9 12l6 6" /></svg>
+          </button>
+        </div>
+        <div class="rail-body">
+        <section class="panel drop-panel" id="dropPanel">
+          <label class="dropzone" id="dropzone" for="fileInput">
+            <input id="fileInput" type="file" accept="image/*" hidden />
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 16V5m0 0 4 4M12 5 8 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="drop-title">Drop a vein image</span>
+            <span class="drop-sub">PNG, JPG, BMP — or click to browse</span>
+          </label>
+
+          <label class="toggle-row" title="Use when veins appear brighter than surrounding skin">
+            <span>
+              <strong>NIR invert</strong>
+              <em>Treat bright veins as dark structure</em>
+            </span>
+            <input type="checkbox" id="invertToggle" />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+        </section>
+
+        <section class="panel samples-panel">
+          <div class="panel-head">
+            <p class="eyebrow">Samples</p>
+            <span class="hint">Scroll to see all</span>
+          </div>
+          <div class="samples" id="samples"></div>
+        </section>
+        </div>
+        <button type="button" class="dock" data-panel="rail" title="Expand source">Source</button>
+      </aside>
+
+      <section class="stage" id="stage">
+        <div class="empty" id="emptyState">
+          <p class="eyebrow">Demonstration</p>
+          <h1>Watch every process land on the hand.</h1>
+          <p class="lede">
+            Upload a dorsal vein photograph and Vena walks the same pipeline as the research code —
+            enhancement, segmentation, skeletonization, then endpoint and bifurcation extraction —
+            with each frame shown as it is produced.
+          </p>
+          <ol class="flow">
+            <li><a href="#about/clahe"><span>01</span>Enhance</a></li>
+            <li><a href="#about/threshold"><span>02</span>Segment</a></li>
+            <li><a href="#about/skeleton"><span>03</span>Skeleton</a></li>
+            <li><a href="#about/landmarks"><span>04</span>Landmarks</a></li>
+          </ol>
+        </div>
+
+        <div class="viewer hidden" id="viewer" hidden>
+          <div class="viewer-head">
+            <div>
+              <p class="step-kicker" id="stepKicker">Capture · 01</p>
+              <h2 id="stepTitle">Original capture</h2>
+            </div>
+            <div class="viewer-actions">
+              <button type="button" class="ghost" id="prevBtn" aria-label="Previous step">←</button>
+              <button type="button" class="ghost" id="nextBtn" aria-label="Next step">→</button>
+              <button type="button" class="ghost" id="replayBtn">Replay</button>
+              <button type="button" class="ghost" id="downloadBtn">Download</button>
+            </div>
+          </div>
+          <p class="step-copy" id="stepCopy"></p>
+
+          <div class="explainer" id="explainer" hidden>
+            <div class="explainer-tabs" role="tablist" id="explainerTabs">
+              <button type="button" class="is-on" data-tab="why" role="tab" aria-selected="true">Why</button>
+              <button type="button" data-tab="how" role="tab" aria-selected="false">How</button>
+              <button type="button" data-tab="params" role="tab" aria-selected="false">Parameters</button>
+              <button type="button" data-tab="look" role="tab" aria-selected="false">What to look for</button>
+            </div>
+            <div class="explainer-body" id="explainerBody"></div>
+            <a class="explainer-more" id="explainerMore" href="#about">Open this step in About →</a>
+          </div>
+
+          <div class="viewport" id="viewport">
+            <img id="stageImage" alt="Current processing stage" />
+            <div class="compare hidden" id="compare">
+              <img id="compareBase" alt="Vein overlay" />
+              <div class="compare-clip" id="compareClip">
+                <img id="compareTop" alt="Original photograph" />
+              </div>
+              <span class="compare-handle" id="compareHandle" aria-hidden="true"></span>
+              <input type="range" id="compareRange" min="0" max="100" value="52" aria-label="Compare original and overlay" />
+              <span class="compare-tag left">Original</span>
+              <span class="compare-tag right">Overlay</span>
+            </div>
+          </div>
+
+          <div class="viewer-foot">
+            <label class="mini-toggle hidden" id="sliderToggleWrap">
+              <input type="checkbox" id="sliderToggle" />
+              <span>Compare with original</span>
+            </label>
+            <p class="kbd-hint">← → to step through the pipeline</p>
+          </div>
+        </div>
+      </section>
+
+      <aside class="facts hidden" id="facts" hidden>
+        <div class="pane-head">
+          <p class="eyebrow">Extraction</p>
+          <button type="button" class="fold" data-panel="facts" aria-expanded="true" title="Collapse features">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+        <div class="facts-body">
+        <h3>Vein features</h3>
+        <div class="metrics" id="metrics"></div>
+        <div class="legend">
+          <span><i class="dot end"></i> Endpoint</span>
+          <span><i class="dot branch"></i> Bifurcation</span>
+        </div>
+        <div class="point-cols">
+          <div>
+            <p class="col-label">Endpoints</p>
+            <ul id="endList"></ul>
+          </div>
+          <div>
+            <p class="col-label">Branches</p>
+            <ul id="branchList"></ul>
+          </div>
+        </div>
+        </div>
+        <button type="button" class="dock" data-panel="facts" title="Expand features">Features</button>
+      </aside>
+    </main>
+
+    <footer class="strip hidden" id="strip" hidden>
+      <div class="strip-label">
+        <p class="eyebrow">Pipeline</p>
+        <p id="stripProgress">0 stages</p>
+      </div>
+      <div class="film" id="film" role="list"></div>
+      <button type="button" class="fold fold-strip" data-panel="strip" aria-expanded="true" title="Collapse pipeline">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+      </button>
+    </footer>
+
+    <section class="about hidden" id="aboutPage" hidden>
+      <article class="about-inner about-wide">
+        <p class="eyebrow">About</p>
+        <h1>How Vena reads a hand.</h1>
+        <p>
+          Vena is a demonstration studio for dorsal hand-vein analysis — not a clinical or identity product.
+          Click any stage in the explorer to see why it exists, how the code implements it, the exact parameters,
+          and what the frame should look like. The same guide appears as Why / How / Parameters tabs in Studio
+          while an image is processing.
+        </p>
+
+        <div class="about-grid">
+          <div class="about-card">
+            <strong>What it is for</strong>
+            Teaching the computer-vision steps behind vein biometrics using the same functions as
+            <code>preprocess.py</code> and <code>features.py</code>.
+          </div>
+          <div class="about-card">
+            <strong>How to use this page</strong>
+            Filter by group, click a stage, then Next / Previous. From Studio, “Open this step in About” lands on the matching card.
+          </div>
+        </div>
+
+        <div class="legend-row">
+          <span><i class="dot end"></i> Endpoint — one skeleton neighbor</span>
+          <span><i class="dot branch"></i> Bifurcation — three or more neighbors</span>
+        </div>
+
+        <div class="guide" id="guide">
+          <div class="guide-side">
+            <div class="guide-filters" id="guideFilters">
+              <button type="button" class="is-on" data-group="all">All</button>
+              <button type="button" data-group="capture">Capture</button>
+              <button type="button" data-group="enhance">Enhance</button>
+              <button type="button" data-group="segment">Segment</button>
+              <button type="button" data-group="extract">Extract</button>
+            </div>
+            <div class="guide-nav" id="guideNav" role="list"></div>
+          </div>
+          <div class="guide-detail" id="guideDetail"></div>
+        </div>
+
+        <h2>How to run</h2>
+        <p>From the project root, with the virtualenv that already has OpenCV and FastAPI:</p>
+        <p><code>.venv/bin/python app.py</code></p>
+        <p>Then open <code>http://127.0.0.1:8000</code>. The repository README has the same process write-up in long form.</p>
+      </article>
+    </section>
+
+    <div class="toast hidden" id="toast" role="status"></div>
+    <script src="/guide.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

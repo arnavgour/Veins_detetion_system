@@ -147,7 +147,7 @@ def visualize_feature_points(skeleton, endpoints, branch_points, save_path="data
 
 
 if __name__ == "__main__":
-    thresholded = cv2.imread("data/output_thresholded.jpg", cv2.IMREAD_GRAYSCALE)
+    thresholded = cv2.imread("data/output_veins.png", cv2.IMREAD_GRAYSCALE)
     if thresholded is None:
         raise FileNotFoundError("Run preprocess.py first to generate data/output_thresholded.jpg")
 

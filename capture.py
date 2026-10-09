@@ -1,7 +1,7 @@
 import cv2
 import os
 
-def capture_image(source="sample", path="data/sample_veins/sample4.png"):
+def capture_image(source="sample", path="data/sample_veins/1.bmp"):
     if source == "sample":
         image = cv2.imread(path)
         if image is None:

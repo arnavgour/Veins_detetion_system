@@ -2,6 +2,12 @@ import cv2
 import matplotlib.pyplot as plt
 from capture import capture_image
 import numpy as np
+from preprocess import (
+    hand_interior_mask,
+    segment_hand,
+    suppress_hand_outline,
+    to_grayscale,
+)
 
 def invert_and_grayscale(frame):
     """Invert colors, then convert to grayscale for downstream processing."""
@@ -67,13 +73,17 @@ def smooth_binary(binary_img, kernel_size=7):
 
 def preprocess_pipeline(frame, show_steps=True):
     inverted_gray = invert_and_grayscale(frame)
+    # Segment the hand on the original (non-inverted) intensity so the silhouette
+    # is measured in anatomical space, not after the invert.
+    hand = segment_hand(to_grayscale(frame))
+    interior, dist = hand_interior_mask(hand)
     median = apply_median_filter(inverted_gray)
     clahe_img = apply_clahe(median)
     median2 = apply_median_filter(clahe_img)
     thresholded = apply_adaptive_threshold(median2)
     smooth = smooth_binary(thresholded)
     cleaned = remove_small_blobs(smooth)
-    veins = remove_border_touching_components(cleaned)
+    veins = suppress_hand_outline(cleaned, interior, dist)
 
     if show_steps:
         stages = [
@@ -82,9 +92,9 @@ def preprocess_pipeline(frame, show_steps=True):
             ("CLAHE", clahe_img),
             ("Median Filter 2", median2),
             ("Adaptive Threshold", thresholded),
-            ("Smooth", smooth),
-            ("Blob Filtered", cleaned),
-            ("Skeleton Removal", veins),
+            # ("Smooth", smooth),
+            # ("Blob Filtered", cleaned),
+            # ("Skeleton Removal", veins),
         ]
         fig, axes = plt.subplots(1, len(stages), figsize=(24, 4))
         for ax, (title, img) in zip(axes, stages):
