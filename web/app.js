@@ -21,7 +21,6 @@ const state = {
   playing: false,
   follow: true,
   invert: false,
-  explainerTab: "why",
   guideId: "original",
   guideGroup: "all",
   analyses: [],
@@ -48,8 +47,6 @@ const els = {
   stepKicker: document.getElementById("stepKicker"),
   stepTitle: document.getElementById("stepTitle"),
   stepCopy: document.getElementById("stepCopy"),
-  stepStats: document.getElementById("stepStats"),
-  lossTab: document.getElementById("lossTab"),
   stageImage: document.getElementById("stageImage"),
   compare: document.getElementById("compare"),
   compareClip: document.getElementById("compareClip"),
@@ -68,10 +65,6 @@ const els = {
   toast: document.getElementById("toast"),
   aboutPage: document.getElementById("aboutPage"),
   navLinks: [...document.querySelectorAll(".nav-link")],
-  explainer: document.getElementById("explainer"),
-  explainerTabs: document.getElementById("explainerTabs"),
-  explainerBody: document.getElementById("explainerBody"),
-  explainerMore: document.getElementById("explainerMore"),
   guideNav: document.getElementById("guideNav"),
   guideDetail: document.getElementById("guideDetail"),
   guideFilters: document.getElementById("guideFilters"),
@@ -243,7 +236,6 @@ function renderStage() {
   els.stepKicker.textContent = `${GROUPS[step.group] || step.group} · ${pad(state.active + 1)} / ${pad(total)}`;
   els.stepTitle.textContent = step.title;
   els.stepCopy.textContent = step.description;
-  renderStepStats(step.stats);
   els.stageImage.src = step.image;
   els.prevBtn.disabled = state.active === 0;
   els.nextBtn.disabled = state.active === total - 1;
@@ -263,7 +255,6 @@ function renderStage() {
   [...els.film.children].forEach((card, i) => {
     card.classList.toggle("active", i === state.active);
   });
-  renderExplainer();
 }
 
 function updateCompare(value) {
@@ -276,32 +267,6 @@ function splitFromClientX(clientX) {
   const rect = els.compare.getBoundingClientRect();
   if (!rect.width) return Number(els.compareRange.value);
   return ((clientX - rect.left) / rect.width) * 100;
-}
-
-function renderStepStats(stats) {
-  if (!els.stepStats) return;
-  const has = Boolean(stats);
-  if (els.lossTab) els.lossTab.hidden = !has;
-  if (!has) {
-    els.stepStats.hidden = true;
-    els.stepStats.classList.add("hidden");
-    els.stepStats.innerHTML = "";
-    if (state.explainerTab === "loss") state.explainerTab = "why";
-    return;
-  }
-  els.stepStats.hidden = false;
-  els.stepStats.classList.remove("hidden");
-  const chips = [
-    [`${stats.entropy_drop_pct}%`, "Entropy gone"],
-    [`${stats.gray_levels_in}→${stats.gray_levels_out}`, "Gray levels"],
-    [`${stats.entropy_in}→${stats.entropy_out}`, "Bits / pixel"],
-    [`${stats.dark_pct_palm}%`, "Palm marked vein"],
-    [`${stats.median_blob_px} px`, "Typical blob"],
-    [Number(stats.components).toLocaleString(), "Islands"],
-  ];
-  els.stepStats.innerHTML = chips
-    .map(([value, label]) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`)
-    .join("");
 }
 
 function renderFacts() {
@@ -544,45 +509,6 @@ function guideList() {
   return all.filter((p) => p.group === state.guideGroup);
 }
 
-function renderExplainer() {
-  if (!els.explainerBody) return;
-  const step = state.steps[state.active];
-  const guide = step && window.guideById ? window.guideById(step.id) : null;
-  if (!guide) {
-    els.explainer.hidden = true;
-    return;
-  }
-  els.explainer.hidden = false;
-  els.explainerTabs.querySelectorAll("button").forEach((btn) => {
-    const on = btn.dataset.tab === state.explainerTab;
-    btn.classList.toggle("is-on", on);
-    btn.setAttribute("aria-selected", on ? "true" : "false");
-  });
-  const tab = state.explainerTab;
-  const stats = step.stats;
-  if (tab === "params") {
-    els.explainerBody.innerHTML = `<ul class="params">${guide.params
-      .map((p) => `<li><strong>${p.name}:</strong> ${p.value} <em>(${p.note})</em></li>`)
-      .join("")}</ul>`;
-  } else if (tab === "how") {
-    els.explainerBody.textContent = guide.how;
-  } else if (tab === "look") {
-    els.explainerBody.textContent = guide.look;
-  } else if (tab === "loss" && stats) {
-    els.explainerBody.innerHTML = `<p>Adaptive threshold is a 1-bit quantizer. Anything only <strong>C = 2</strong> gray levels darker than its neighborhood becomes black — including CLAHE grain.</p>
-      <ul class="params">
-        <li><strong>Gray levels:</strong> ${stats.gray_levels_in} → ${stats.gray_levels_out}</li>
-        <li><strong>Entropy:</strong> ${stats.entropy_in} → ${stats.entropy_out} bits/px (${stats.entropy_drop_pct}% gone)</li>
-        <li><strong>Palm marked vein:</strong> ${stats.dark_pct_palm}%</li>
-        <li><strong>Connected islands:</strong> ${Number(stats.components).toLocaleString()} (median ${stats.median_blob_px} px)</li>
-        <li><strong>Islands ≥ 500 px:</strong> ${stats.blobs_ge_500}</li>
-      </ul>`;
-  } else {
-    els.explainerBody.textContent = guide.why;
-  }
-  els.explainerMore.href = `#about/${guide.id}`;
-}
-
 function renderGuide() {
   if (!els.guideNav || !els.guideDetail) return;
   const list = guideList();
@@ -656,12 +582,6 @@ function initGuide() {
     if (!btn) return;
     state.guideGroup = btn.dataset.group;
     renderGuide();
-  });
-  els.explainerTabs?.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-tab]");
-    if (!btn) return;
-    state.explainerTab = btn.dataset.tab;
-    renderExplainer();
   });
 }
 

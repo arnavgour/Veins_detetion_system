@@ -95,10 +95,15 @@
             with each frame shown as it is produced.
           </p>
           <ol class="flow">
-            <li><a href="#about/clahe"><span>01</span>Enhance</a></li>
-            <li><a href="#about/threshold"><span>02</span>Segment</a></li>
-            <li><a href="#about/skeleton"><span>03</span>Skeleton</a></li>
-            <li><a href="#about/landmarks"><span>04</span>Landmarks</a></li>
+            <li><a href="#about/original"><span>01</span>Original</a></li>
+            <li><a href="#about/median"><span>02</span>Median</a></li>
+            <li><a href="#about/clahe"><span>03</span>Enhance</a></li>
+            <li><a href="#about/median2"><span>04</span>Median</a></li>
+            <li><a href="#about/threshold"><span>05</span>Threshold</a></li>
+            <li><a href="#about/mask"><span>06</span>Mask</a></li>
+            <li><a href="#about/skeleton"><span>07</span>Skeleton</a></li>
+            <li><a href="#about/landmarks"><span>08</span>Landmarks</a></li>
+            <li><a href="#about/overlay"><span>09</span>Overlay</a></li>
           </ol>
         </div>
 
@@ -116,19 +121,6 @@
             </div>
           </div>
           <p class="step-copy" id="stepCopy"></p>
-          <div class="step-stats hidden" id="stepStats" hidden></div>
-
-          <div class="explainer" id="explainer" hidden>
-            <div class="explainer-tabs" role="tablist" id="explainerTabs">
-              <button type="button" class="is-on" data-tab="why" role="tab" aria-selected="true">Why</button>
-              <button type="button" data-tab="how" role="tab" aria-selected="false">How</button>
-              <button type="button" data-tab="params" role="tab" aria-selected="false">Parameters</button>
-              <button type="button" data-tab="look" role="tab" aria-selected="false">What to look for</button>
-              <button type="button" data-tab="loss" role="tab" aria-selected="false" id="lossTab" hidden>Loss</button>
-            </div>
-            <div class="explainer-body" id="explainerBody"></div>
-            <a class="explainer-more" id="explainerMore" href="#about">Open this step in About →</a>
-          </div>
 
           <div class="viewport" id="viewport">
             <img id="stageImage" alt="Current processing stage" />

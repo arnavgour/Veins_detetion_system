@@ -26,13 +26,23 @@ from preprocess import (
     clip_skeleton_to_interior,
     hand_interior_mask,
     remove_small_blobs,
-    render_hand_roi,
     segment_hand,
     smooth_binary,
     suppress_hand_outline,
-    threshold_loss_report,
     to_grayscale,
 )
+
+STUDIO_STEPS = {
+    "original",
+    "median",
+    "clahe",
+    "median2",
+    "threshold",
+    "mask",
+    "skeleton",
+    "landmarks",
+    "overlay",
+}
 
 MAX_SIDE = 1400
 
@@ -132,9 +142,9 @@ def iter_analysis(
     frame = maybe_resize(frame)
     h, w = frame.shape[:2]
 
-    def emit_step(*args, **kwargs):
-        if emit_steps:
-            yield _step(*args, **kwargs)
+    def emit_step(step_id, *args, **kwargs):
+        if emit_steps and step_id in STUDIO_STEPS:
+            yield _step(step_id, *args, **kwargs)
 
     if emit_steps:
         yield {
@@ -147,8 +157,8 @@ def iter_analysis(
 
     yield from emit_step(
         "original",
-        "Original capture",
-        "The uploaded dorsal-hand image as received. Later stages hang vein geometry back onto this frame.",
+        "Original",
+        "The uploaded dorsal-hand image as received.",
         "capture",
         frame,
         "jpg",
@@ -157,41 +167,17 @@ def iter_analysis(
     native_gray = to_grayscale(frame)
     hand = segment_hand(native_gray)
     interior, dist = hand_interior_mask(hand)
-    yield from emit_step(
-        "hand",
-        "Hand interior ROI",
-        "The palm is segmented and a gold band along the silhouette is excluded. Vein pixels in that band are deleted after thresholding so the hand outline cannot be mistaken for a vessel.",
-        "capture",
-        render_hand_roi(frame, hand, interior),
-        "jpg",
-    )
 
     if invert:
         gray = invert_and_grayscale(frame)
-        yield from emit_step(
-            "gray",
-            "Invert + grayscale",
-            "Colors are inverted so bright NIR veins become dark, then reduced to a single intensity channel.",
-            "enhance",
-            gray,
-            "jpg",
-        )
     else:
         gray = native_gray
-        yield from emit_step(
-            "gray",
-            "Grayscale",
-            "Color is discarded so contrast is driven only by intensity — the signal that veins actually live in.",
-            "enhance",
-            gray,
-            "jpg",
-        )
 
     median = apply_median_filter(gray)
     yield from emit_step(
         "median",
         "Median filter",
-        "A light 5×5 median knocks out pores and speckle without smearing thin veins.",
+        "A first median pass knocks out pores and speckle before contrast is raised.",
         "enhance",
         median,
         "jpg",
@@ -200,8 +186,8 @@ def iter_analysis(
     clahe_img = apply_clahe(median)
     yield from emit_step(
         "clahe",
-        "CLAHE enhancement",
-        "Contrast Limited Adaptive Histogram Equalization lifts faint subcutaneous veins without blowing out skin.",
+        "Enhancement",
+        "CLAHE lifts faint veins after the first median denoise.",
         "enhance",
         clahe_img,
         "jpg",
@@ -210,99 +196,51 @@ def iter_analysis(
     median2 = apply_median_filter(clahe_img)
     yield from emit_step(
         "median2",
-        "Second median pass",
-        "CLAHE amplifies leftover grain, so a second 5×5 median calms the field before thresholding.",
+        "Second median",
+        "A second median calms grain that CLAHE amplified, before thresholding.",
         "enhance",
         median2,
         "jpg",
     )
 
     thresholded = apply_adaptive_threshold(median2)
-    loss = threshold_loss_report(median2, thresholded, interior)
     yield from emit_step(
         "threshold",
         "Adaptive threshold",
-        (
-            f"{loss['gray_levels_in']} gray levels collapsed to {loss['gray_levels_out']}; "
-            f"entropy {loss['entropy_in']} → {loss['entropy_out']} bits "
-            f"({loss['entropy_drop_pct']}% of intensity information gone). "
-            f"{loss['dark_pct_palm']}% of the palm is marked vein; a typical island is "
-            f"{loss['median_blob_px']} px. Later stages throw most of that speckle away."
-        ),
+        "Local thresholding turns dark veins into a binary mask, before cleanup.",
         "segment",
         _render_binary(thresholded),
         "png",
-        stats=loss,
     )
 
     smooth = smooth_binary(thresholded)
-    yield from emit_step(
-        "smooth",
-        "Morphological smooth",
-        "Closing then opening with an elliptical kernel bridges small gaps and erases speckle in the mask.",
-        "segment",
-        _render_binary(smooth),
-        "png",
-    )
 
     cleaned = remove_small_blobs(smooth)
-    yield from emit_step(
-        "blobs",
-        "Blob filter",
-        "Connected components smaller than the area cutoff are dropped so pores and noise never become veins.",
-        "segment",
-        _render_binary(cleaned),
-        "png",
-    )
 
     veins = suppress_hand_outline(cleaned, interior, dist)
     yield from emit_step(
         "mask",
         "Vein mask",
-        "Every pixel in the silhouette band is forced to not-a-vein, then leftover border and contour-hugging blobs are dropped so only interior vasculature remains.",
+        "Interior vessels only — silhouette and speckle have been removed.",
         "segment",
         _render_binary(veins),
         "png",
     )
 
     outlined = features_remove_border(veins)
-    yield from emit_step(
-        "outline",
-        "Outline isolation",
-        "A tighter border pass (used by feature extraction) removes any remaining silhouette still clinging to the mask.",
-        "extract",
-        _render_binary(outlined),
-        "png",
-    )
 
     skel_src = prepare_skeleton_mask(outlined)
-    yield from emit_step(
-        "skel_prep",
-        "Skeleton prep",
-        "Vessel walls are median-smoothed and opened so edge jaggies cannot become a fur of false spurs when the mask is thinned.",
-        "extract",
-        _render_binary(skel_src),
-        "png",
-    )
 
     spur_len = spur_length_px(skel_src.shape)
     skeleton = clip_skeleton_to_interior(get_skeleton(skel_src), dist)
     skeleton = prune_spurs(skeleton, max_spur_length=spur_len)
-    yield from emit_step(
-        "skeleton",
-        "Skeletonization",
-        "The vein mask is thinned to a centerline, clipped off the hand contour, and short fringe twigs are walked off so the graph is not hairy.",
-        "extract",
-        _render_skeleton(skeleton),
-        "png",
-    )
 
     pruned = drop_short_skeleton_segments(skeleton, min_len=spur_len)
     pruned = clip_skeleton_to_interior(prune_spurs(pruned, max_spur_length=spur_len), dist)
     yield from emit_step(
-        "pruned",
-        "Spur pruning",
-        "Remaining dead-end twigs and isolated specks shorter than the spur cutoff are erased from the graph.",
+        "skeleton",
+        "Skeleton",
+        "Centerlines after spur pruning — the graph used for endpoints and bifurcations.",
         "extract",
         _render_skeleton(pruned),
         "png",
@@ -317,8 +255,8 @@ def iter_analysis(
         atlas = _draw_landmarks(_render_skeleton(pruned), endpoints, branch_points)
         yield from emit_step(
             "landmarks",
-            "Feature landmarks",
-            "Pixels with one neighbor are endpoints (green). Pixels with three or more are bifurcations (red). Nearby detections are merged.",
+            "Landmarks",
+            "Green endpoints and red bifurcations on the skeleton.",
             "extract",
             atlas,
             "png",
@@ -326,8 +264,8 @@ def iter_analysis(
         overlay = _overlay(frame, vein_mask, endpoints, branch_points)
         yield from emit_step(
             "overlay",
-            "Vein overlay",
-            "The extracted mask and landmarks are composited onto the original photograph so you can judge anatomical fit.",
+            "Overlay",
+            "Mask and landmarks on the original. Use Compare to wipe between the two.",
             "extract",
             overlay,
             "jpg",

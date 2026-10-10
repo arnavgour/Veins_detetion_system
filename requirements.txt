@@ -6,3 +6,5 @@ matplotlib
 fastapi
 uvicorn[standard]
 python-multipart
+# sqlite3 — Python standard library (used by store.py; not a pip package)
+

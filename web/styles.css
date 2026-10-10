@@ -633,37 +633,6 @@ a.ghost {
   font-size: 0.92rem;
 }
 
-.step-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.step-stats .stat {
-  background: #f3eee4;
-  border-radius: 12px;
-  padding: 8px 10px;
-}
-
-.step-stats .stat b {
-  display: block;
-  font-size: 1.05rem;
-  letter-spacing: -0.03em;
-}
-
-.step-stats .stat span {
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 600;
-}
-
-.explainer {
-  background: #f3eee4;
-  border-radius: 14px;
-  padding: 8px 10px 10px;
-  flex: 0 0 auto;
-}
-
 .explainer-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -688,32 +657,6 @@ a.ghost {
   background: var(--cream);
   border-color: var(--line);
   color: var(--sage);
-}
-
-.explainer-body {
-  color: var(--ink);
-  font-size: 0.84rem;
-  line-height: 1.5;
-  max-height: 5.6em;
-  overflow: auto;
-}
-
-.explainer-body .params {
-  margin: 0;
-  padding-left: 1.1rem;
-}
-
-.explainer-more {
-  display: inline-block;
-  margin-top: 6px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--sage);
-  text-decoration: none;
-}
-
-.explainer-more:hover {
-  text-decoration: underline;
 }
 
 .viewport {
