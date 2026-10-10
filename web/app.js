@@ -24,6 +24,12 @@ const state = {
   explainerTab: "why",
   guideId: "original",
   guideGroup: "all",
+  analyses: [],
+  seeding: false,
+  dataView: "table",
+  dataSource: "all",
+  selectedAnalysisId: null,
+  selectedAnalysis: null,
 };
 
 const els = {
@@ -69,10 +75,32 @@ const els = {
   guideNav: document.getElementById("guideNav"),
   guideDetail: document.getElementById("guideDetail"),
   guideFilters: document.getElementById("guideFilters"),
+  dataPage: document.getElementById("dataPage"),
+  dataViewTabs: document.getElementById("dataViewTabs"),
+  dataSourceTabs: document.getElementById("dataSourceTabs"),
+  dataCount: document.getElementById("dataCount"),
+  dataRefresh: document.getElementById("dataRefresh"),
+  dataBanner: document.getElementById("dataBanner"),
+  dataTableView: document.getElementById("dataTableView"),
+  dataGraphView: document.getElementById("dataGraphView"),
+  dataTableBody: document.getElementById("dataTableBody"),
+  chartLandmarks: document.getElementById("chartLandmarks"),
+  chartPixels: document.getElementById("chartPixels"),
+  chartTime: document.getElementById("chartTime"),
+  dataDetail: document.getElementById("dataDetail"),
+  detailKicker: document.getElementById("detailKicker"),
+  detailTitle: document.getElementById("detailTitle"),
+  detailClose: document.getElementById("detailClose"),
+  detailMetrics: document.getElementById("detailMetrics"),
+  detailEnds: document.getElementById("detailEnds"),
+  detailBranches: document.getElementById("detailBranches"),
+  chartScatter: document.getElementById("chartScatter"),
 };
 
 let replayTimer = null;
 let toastTimer = null;
+let seedPollTimer = null;
+let chartTip = null;
 
 function setMode(mode) {
   els.body.classList.remove("idle", "running", "ready");
@@ -454,6 +482,7 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") document.getElementById("guidePrev")?.click();
     return;
   }
+  if (els.body.classList.contains("show-data")) return;
   if (e.key === "ArrowRight") els.nextBtn.click();
   if (e.key === "ArrowLeft") els.prevBtn.click();
 });
@@ -461,6 +490,7 @@ window.addEventListener("keydown", (e) => {
 function currentPage() {
   const hash = (location.hash || "#studio").replace("#", "");
   if (hash === "about" || hash.startsWith("about/")) return "about";
+  if (hash === "data" || hash.startsWith("data/")) return "data";
   return "studio";
 }
 
@@ -472,12 +502,22 @@ function aboutStepFromHash() {
 
 function showPage(page) {
   const about = page === "about";
+  const data = page === "data";
   els.body.classList.toggle("show-about", about);
+  els.body.classList.toggle("show-data", data);
   els.aboutPage.classList.toggle("hidden", !about);
   els.aboutPage.hidden = !about;
+  els.dataPage.classList.toggle("hidden", !data);
+  els.dataPage.hidden = !data;
   els.navLinks.forEach((link) => {
     link.classList.toggle("is-active", link.dataset.page === page);
   });
+  if (data) {
+    els.statusPill.textContent = "Feature store";
+    loadFeatureData();
+  } else {
+    clearTimeout(seedPollTimer);
+  }
   if (about) {
     els.statusPill.textContent = "About the pipeline";
     const fromHash = aboutStepFromHash();
@@ -486,6 +526,8 @@ function showPage(page) {
       state.guideGroup = "all";
     }
     renderGuide();
+  } else if (data) {
+    /* status set above */
   } else if (state.steps.length) {
     els.statusPill.textContent = STATUS[els.body.classList.contains("running") ? "running" : "ready"];
     if (state.metrics?.elapsed_ms && els.body.classList.contains("ready")) {
@@ -623,8 +665,452 @@ function initGuide() {
   });
 }
 
+function filteredAnalyses() {
+  if (state.dataSource === "all") return state.analyses;
+  return state.analyses.filter((row) => row.source === state.dataSource);
+}
+
+function fmtInt(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function fmtCompact(value) {
+  const n = Number(value || 0);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function fmtWhen(iso) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function chartLabel(row) {
+  const stem = String(row.filename || "image").replace(/\.[^.]+$/, "");
+  const short = stem.length > 12 ? `${stem.slice(0, 10)}…` : stem;
+  return `${short} #${row.id}`;
+}
+
+function svgEl(name, attrs = {}, text) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function hideChartTip() {
+  if (chartTip) chartTip.classList.add("hidden");
+}
+
+function showChartTip(event, html) {
+  if (!chartTip) {
+    chartTip = document.createElement("div");
+    chartTip.className = "chart-tip hidden";
+    document.body.appendChild(chartTip);
+  }
+  chartTip.innerHTML = html;
+  chartTip.classList.remove("hidden");
+  chartTip.style.left = `${event.clientX}px`;
+  chartTip.style.top = `${event.clientY}px`;
+}
+
+function emptyChart(host, message) {
+  host.innerHTML = `<p class="chart-empty">${message}</p>`;
+}
+
+function renderGroupedBars(host, { labels, series, format = fmtCompact, ids = [] }) {
+  host.innerHTML = "";
+  if (!labels.length) {
+    emptyChart(host, "No stored analyses to plot yet.");
+    return;
+  }
+  const legend = document.createElement("div");
+  legend.className = "chart-legend";
+  legend.innerHTML = series
+    .map((item) => `<span><i class="dot" style="background:${item.color}"></i>${item.name}</span>`)
+    .join("");
+
+  const width = Math.max(host.clientWidth || 640, labels.length * 72);
+  const height = 260;
+  const margin = { top: 16, right: 12, bottom: 58, left: 46 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const maxVal = Math.max(1, ...series.flatMap((item) => item.values));
+  const groupW = innerW / labels.length;
+  const barW = Math.max(6, (groupW / (series.length + 1.2)) * 0.92);
+
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    width,
+    height,
+    role: "img",
+  });
+  const g = svgEl("g", { transform: `translate(${margin.left},${margin.top})` });
+  svg.appendChild(g);
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i += 1) {
+    const value = (maxVal * i) / ticks;
+    const y = innerH - (value / maxVal) * innerH;
+    g.appendChild(svgEl("line", { x1: 0, x2: innerW, y1: y, y2: y, stroke: "rgba(25,21,18,0.08)" }));
+    g.appendChild(svgEl("text", { x: -8, y: y + 4, "text-anchor": "end", fill: "#746b60", "font-size": 10 }, format(value)));
+  }
+
+  labels.forEach((label, index) => {
+    const gx = index * groupW;
+    series.forEach((item, sIndex) => {
+      const value = item.values[index] || 0;
+      const h = (value / maxVal) * innerH;
+      const x = gx + (sIndex + 0.45) * barW;
+      const y = innerH - h;
+      const rect = svgEl("rect", {
+        x,
+        y,
+        width: barW,
+        height: Math.max(h, value ? 2 : 0),
+        rx: 4,
+        fill: item.color,
+        "data-id": ids[index] || "",
+      });
+      rect.style.cursor = ids[index] ? "pointer" : "default";
+      rect.addEventListener("pointerenter", (event) => {
+        showChartTip(event, `<b>${label}</b><br>${item.name}: ${fmtInt(value)}`);
+      });
+      rect.addEventListener("pointermove", (event) => showChartTip(event, chartTip.innerHTML));
+      rect.addEventListener("pointerleave", hideChartTip);
+      if (ids[index]) {
+        rect.addEventListener("click", () => selectAnalysis(ids[index]));
+      }
+      g.appendChild(rect);
+    });
+    const text = svgEl(
+      "text",
+      {
+        x: gx + groupW / 2,
+        y: innerH + 16,
+        "text-anchor": "end",
+        fill: "#746b60",
+        "font-size": 10,
+        transform: `rotate(-32 ${gx + groupW / 2} ${innerH + 16})`,
+      },
+      label
+    );
+    g.appendChild(text);
+  });
+
+  host.appendChild(svg);
+  host.appendChild(legend);
+}
+
+function renderScatter(host, analysis) {
+  host.innerHTML = "";
+  if (!analysis) {
+    emptyChart(host, "Select a row to plot its landmarks.");
+    return;
+  }
+  const ends = analysis.endpoint_points || [];
+  const branches = analysis.branch_points || [];
+  if (!ends.length && !branches.length) {
+    emptyChart(host, "This run has no stored landmarks.");
+    return;
+  }
+  const width = Math.max(host.clientWidth || 480, 360);
+  const height = 340;
+  const margin = { top: 16, right: 16, bottom: 36, left: 40 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const maxX = Math.max(analysis.width || 1, ...ends.map((p) => p.x), ...branches.map((p) => p.x), 1);
+  const maxY = Math.max(analysis.height || 1, ...ends.map((p) => p.y), ...branches.map((p) => p.y), 1);
+  const sx = (x) => (x / maxX) * innerW;
+  const sy = (y) => (y / maxY) * innerH;
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img" });
+  const g = svgEl("g", { transform: `translate(${margin.left},${margin.top})` });
+  svg.appendChild(g);
+  g.appendChild(svgEl("rect", { x: 0, y: 0, width: innerW, height: innerH, fill: "#fffbf4", rx: 10 }));
+  g.appendChild(svgEl("text", { x: innerW / 2, y: innerH + 28, "text-anchor": "middle", fill: "#746b60", "font-size": 11 }, `X · ${maxX} px`));
+  g.appendChild(svgEl("text", { x: -28, y: innerH / 2, "text-anchor": "middle", fill: "#746b60", "font-size": 11, transform: `rotate(-90 -28 ${innerH / 2})` }, `Y · ${maxY} px`));
+
+  const drawPoints = (points, color, label) => {
+    points.forEach((p) => {
+      const circle = svgEl("circle", { cx: sx(p.x), cy: sy(p.y), r: 4.2, fill: color, stroke: "#fff", "stroke-width": 1 });
+      circle.addEventListener("pointerenter", (event) => {
+        showChartTip(event, `${label}<br>${p.x}, ${p.y}`);
+      });
+      circle.addEventListener("pointerleave", hideChartTip);
+      g.appendChild(circle);
+    });
+  };
+  drawPoints(ends, "#1f8a5b", "Endpoint");
+  drawPoints(branches, "#c44536", "Bifurcation");
+  host.appendChild(svg);
+}
+
+function renderDataTable() {
+  const rows = filteredAnalyses();
+  if (!els.dataTableBody) return;
+  if (!rows.length) {
+    const message = state.seeding
+      ? "Seeding built-in sample features…"
+      : state.analyses.length
+        ? "No analyses match this filter."
+        : "No stored features yet. Upload an image in Studio, or wait for samples to finish seeding.";
+    els.dataTableBody.innerHTML = `<tr class="empty-row"><td colspan="12">${message}</td></tr>`;
+    return;
+  }
+  els.dataTableBody.innerHTML = rows
+    .map((row) => {
+      const selected = row.id === state.selectedAnalysisId ? "is-on" : "";
+      return `
+        <tr data-id="${row.id}" class="${selected}">
+          <td>${row.id}</td>
+          <td>${row.filename}</td>
+          <td><span class="source-chip ${row.source}">${row.source}</span></td>
+          <td>${row.invert ? '<span class="invert-chip">NIR</span>' : "—"}</td>
+          <td>${fmtInt(row.endpoints)}</td>
+          <td>${fmtInt(row.branches)}</td>
+          <td>${fmtInt(row.skeleton_pixels)}</td>
+          <td>${fmtInt(row.vein_pixels)}</td>
+          <td>${row.width}×${row.height}</td>
+          <td>${row.elapsed_ms ?? "—"} ms</td>
+          <td>${fmtWhen(row.created_at)}</td>
+          <td><button type="button" class="ghost data-del" data-del="${row.id}" aria-label="Delete analysis ${row.id}">Delete</button></td>
+        </tr>`;
+    })
+    .join("");
+}
+
+function renderDataCharts() {
+  const rows = [...filteredAnalyses()].sort((a, b) => a.id - b.id);
+  const labels = rows.map(chartLabel);
+  const ids = rows.map((row) => row.id);
+  if (els.chartLandmarks) {
+    renderGroupedBars(els.chartLandmarks, {
+      labels,
+      ids,
+      series: [
+        { name: "Endpoints", values: rows.map((row) => row.endpoints || 0), color: "#1f8a5b" },
+        { name: "Bifurcations", values: rows.map((row) => row.branches || 0), color: "#c44536" },
+      ],
+    });
+  }
+  if (els.chartPixels) {
+    renderGroupedBars(els.chartPixels, {
+      labels,
+      ids,
+      series: [
+        { name: "Skeleton px", values: rows.map((row) => row.skeleton_pixels || 0), color: "#215f4a" },
+        { name: "Vein px", values: rows.map((row) => row.vein_pixels || 0), color: "#c45c26" },
+      ],
+    });
+  }
+  if (els.chartTime) {
+    renderGroupedBars(els.chartTime, {
+      labels,
+      ids,
+      format: (n) => `${Math.round(n)}`,
+      series: [{ name: "Elapsed ms", values: rows.map((row) => row.elapsed_ms || 0), color: "#2f7a60" }],
+    });
+  }
+  if (state.selectedAnalysis) renderScatter(els.chartScatter, state.selectedAnalysis);
+}
+
+function renderDataChrome() {
+  const rows = filteredAnalyses();
+  if (els.dataCount) {
+    els.dataCount.textContent = `${rows.length} ${rows.length === 1 ? "analysis" : "analyses"}`;
+  }
+  if (els.dataBanner) {
+    if (state.seeding) {
+      els.dataBanner.hidden = false;
+      els.dataBanner.classList.remove("hidden");
+      els.dataBanner.textContent = "Built-in samples are being analyzed into SQLite. This page will refresh when they land.";
+    } else {
+      els.dataBanner.hidden = true;
+      els.dataBanner.classList.add("hidden");
+    }
+  }
+  els.dataViewTabs?.querySelectorAll("button").forEach((btn) => {
+    const on = btn.dataset.view === state.dataView;
+    btn.classList.toggle("is-on", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  els.dataSourceTabs?.querySelectorAll("button").forEach((btn) => {
+    btn.classList.toggle("is-on", btn.dataset.source === state.dataSource);
+  });
+  if (els.dataTableView) {
+    els.dataTableView.hidden = state.dataView !== "table";
+    els.dataTableView.classList.toggle("hidden", state.dataView !== "table");
+  }
+  if (els.dataGraphView) {
+    els.dataGraphView.hidden = state.dataView !== "graph";
+    els.dataGraphView.classList.toggle("hidden", state.dataView !== "graph");
+  }
+  if (els.statusPill && currentPage() === "data") {
+    els.statusPill.textContent = state.seeding ? "Seeding sample features" : `${state.analyses.length} stored analyses`;
+  }
+}
+
+function renderDataPage() {
+  renderDataChrome();
+  renderDataTable();
+  if (state.dataView === "graph") {
+    requestAnimationFrame(() => renderDataCharts());
+  }
+  renderDetail();
+}
+
+function renderDetail() {
+  const row = state.selectedAnalysis;
+  if (!els.dataDetail) return;
+  if (!row) {
+    els.dataDetail.hidden = true;
+    els.dataDetail.classList.add("hidden");
+    return;
+  }
+  els.dataDetail.hidden = false;
+  els.dataDetail.classList.remove("hidden");
+  els.detailKicker.textContent = `${row.source} · ${row.invert ? "NIR invert" : "native"} · ${fmtWhen(row.created_at)}`;
+  els.detailTitle.textContent = row.filename;
+  const items = [
+    [row.endpoints, "Endpoints"],
+    [row.branches, "Bifurcations"],
+    [row.skeleton_pixels, "Skeleton px"],
+    [row.vein_pixels, "Vein pixels"],
+    [`${row.width}×${row.height}`, "Working size"],
+    [`${row.elapsed_ms ?? "—"} ms`, "Elapsed"],
+  ];
+  els.detailMetrics.innerHTML = items
+    .map(
+      ([value, label]) =>
+        `<div class="metric"><b>${typeof value === "number" ? fmtInt(value) : value}</b><span>${label}</span></div>`
+    )
+    .join("");
+  const fill = (node, points) => {
+    if (!node) return;
+    if (!points.length) {
+      node.innerHTML = "<li>None stored</li>";
+      return;
+    }
+    node.innerHTML = points.map((p) => `<li>${p.x}, ${p.y}</li>`).join("");
+  };
+  fill(els.detailEnds, row.endpoint_points || []);
+  fill(els.detailBranches, row.branch_points || []);
+  requestAnimationFrame(() => renderScatter(els.chartScatter, row));
+}
+
+async function loadFeatureData() {
+  try {
+    const res = await fetch("/api/features");
+    if (!res.ok) throw new Error("Could not load stored features.");
+    const payload = await res.json();
+    state.analyses = payload.analyses || [];
+    state.seeding = Boolean(payload.seeding);
+    if (state.selectedAnalysisId && !state.analyses.some((row) => row.id === state.selectedAnalysisId)) {
+      state.selectedAnalysisId = null;
+      state.selectedAnalysis = null;
+    }
+    renderDataPage();
+    clearTimeout(seedPollTimer);
+    if (state.seeding && currentPage() === "data") {
+      seedPollTimer = setTimeout(loadFeatureData, 2000);
+    }
+  } catch (err) {
+    if (els.dataBanner) {
+      els.dataBanner.hidden = false;
+      els.dataBanner.classList.remove("hidden");
+      els.dataBanner.textContent = err.message || "Could not load the feature store.";
+    }
+  }
+}
+
+async function selectAnalysis(id) {
+  const numericId = Number(id);
+  if (!numericId) return;
+  if (state.selectedAnalysisId === numericId && state.selectedAnalysis) {
+    renderDataPage();
+    return;
+  }
+  try {
+    const res = await fetch(`/api/features/${numericId}`);
+    if (!res.ok) throw new Error("Could not open that analysis.");
+    state.selectedAnalysisId = numericId;
+    state.selectedAnalysis = await res.json();
+    renderDataPage();
+    els.dataDetail?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) {
+    showToast(err.message || "Could not open that analysis.");
+  }
+}
+
+async function deleteAnalysis(id) {
+  const numericId = Number(id);
+  if (!numericId) return;
+  if (!window.confirm(`Delete stored features for analysis #${numericId}?`)) return;
+  try {
+    const res = await fetch(`/api/features/${numericId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Could not delete that analysis.");
+    if (state.selectedAnalysisId === numericId) {
+      state.selectedAnalysisId = null;
+      state.selectedAnalysis = null;
+    }
+    await loadFeatureData();
+    showToast(`Deleted analysis #${numericId}`);
+  } catch (err) {
+    showToast(err.message || "Could not delete that analysis.");
+  }
+}
+
+function initDataPage() {
+  els.dataViewTabs?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-view]");
+    if (!btn) return;
+    state.dataView = btn.dataset.view;
+    renderDataPage();
+  });
+  els.dataSourceTabs?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-source]");
+    if (!btn) return;
+    state.dataSource = btn.dataset.source;
+    renderDataPage();
+  });
+  els.dataRefresh?.addEventListener("click", () => loadFeatureData());
+  els.dataTableBody?.addEventListener("click", (e) => {
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteAnalysis(del.dataset.del);
+      return;
+    }
+    const row = e.target.closest("tr[data-id]");
+    if (row) selectAnalysis(row.dataset.id);
+  });
+  els.detailClose?.addEventListener("click", () => {
+    state.selectedAnalysisId = null;
+    state.selectedAnalysis = null;
+    renderDataPage();
+  });
+  window.addEventListener("resize", () => {
+    if (currentPage() === "data" && state.dataView === "graph") {
+      renderDataCharts();
+    } else if (state.selectedAnalysis) {
+      renderScatter(els.chartScatter, state.selectedAnalysis);
+    }
+  });
+}
+
 window.addEventListener("hashchange", () => showPage(currentPage()));
 initGuide();
+initDataPage();
 showPage(currentPage());
 loadSamples();
 initPanels();

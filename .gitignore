@@ -1,1 +1,5 @@
 .idea/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+__pycache__/

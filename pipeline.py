@@ -121,20 +121,31 @@ def _step(step_id, title, description, group, img, fmt="jpg", stats=None):
     return event
 
 
-def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "upload"):
+def iter_analysis(
+    frame: np.ndarray,
+    invert: bool = False,
+    filename: str = "upload",
+    emit_steps: bool = True,
+):
     """Yield NDJSON-ready events as each pipeline stage completes."""
     started = time.perf_counter()
     frame = maybe_resize(frame)
     h, w = frame.shape[:2]
-    yield {
-        "type": "meta",
-        "filename": filename,
-        "width": w,
-        "height": h,
-        "invert": invert,
-    }
 
-    yield _step(
+    def emit_step(*args, **kwargs):
+        if emit_steps:
+            yield _step(*args, **kwargs)
+
+    if emit_steps:
+        yield {
+            "type": "meta",
+            "filename": filename,
+            "width": w,
+            "height": h,
+            "invert": invert,
+        }
+
+    yield from emit_step(
         "original",
         "Original capture",
         "The uploaded dorsal-hand image as received. Later stages hang vein geometry back onto this frame.",
@@ -146,7 +157,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     native_gray = to_grayscale(frame)
     hand = segment_hand(native_gray)
     interior, dist = hand_interior_mask(hand)
-    yield _step(
+    yield from emit_step(
         "hand",
         "Hand interior ROI",
         "The palm is segmented and a gold band along the silhouette is excluded. Vein pixels in that band are deleted after thresholding so the hand outline cannot be mistaken for a vessel.",
@@ -157,7 +168,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
 
     if invert:
         gray = invert_and_grayscale(frame)
-        yield _step(
+        yield from emit_step(
             "gray",
             "Invert + grayscale",
             "Colors are inverted so bright NIR veins become dark, then reduced to a single intensity channel.",
@@ -167,7 +178,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
         )
     else:
         gray = native_gray
-        yield _step(
+        yield from emit_step(
             "gray",
             "Grayscale",
             "Color is discarded so contrast is driven only by intensity — the signal that veins actually live in.",
@@ -177,7 +188,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
         )
 
     median = apply_median_filter(gray)
-    yield _step(
+    yield from emit_step(
         "median",
         "Median filter",
         "A light 5×5 median knocks out pores and speckle without smearing thin veins.",
@@ -187,7 +198,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     clahe_img = apply_clahe(median)
-    yield _step(
+    yield from emit_step(
         "clahe",
         "CLAHE enhancement",
         "Contrast Limited Adaptive Histogram Equalization lifts faint subcutaneous veins without blowing out skin.",
@@ -197,7 +208,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     median2 = apply_median_filter(clahe_img)
-    yield _step(
+    yield from emit_step(
         "median2",
         "Second median pass",
         "CLAHE amplifies leftover grain, so a second 5×5 median calms the field before thresholding.",
@@ -208,7 +219,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
 
     thresholded = apply_adaptive_threshold(median2)
     loss = threshold_loss_report(median2, thresholded, interior)
-    yield _step(
+    yield from emit_step(
         "threshold",
         "Adaptive threshold",
         (
@@ -225,7 +236,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     smooth = smooth_binary(thresholded)
-    yield _step(
+    yield from emit_step(
         "smooth",
         "Morphological smooth",
         "Closing then opening with an elliptical kernel bridges small gaps and erases speckle in the mask.",
@@ -235,7 +246,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     cleaned = remove_small_blobs(smooth)
-    yield _step(
+    yield from emit_step(
         "blobs",
         "Blob filter",
         "Connected components smaller than the area cutoff are dropped so pores and noise never become veins.",
@@ -245,7 +256,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     veins = suppress_hand_outline(cleaned, interior, dist)
-    yield _step(
+    yield from emit_step(
         "mask",
         "Vein mask",
         "Every pixel in the silhouette band is forced to not-a-vein, then leftover border and contour-hugging blobs are dropped so only interior vasculature remains.",
@@ -255,7 +266,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     outlined = features_remove_border(veins)
-    yield _step(
+    yield from emit_step(
         "outline",
         "Outline isolation",
         "A tighter border pass (used by feature extraction) removes any remaining silhouette still clinging to the mask.",
@@ -265,7 +276,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     )
 
     skel_src = prepare_skeleton_mask(outlined)
-    yield _step(
+    yield from emit_step(
         "skel_prep",
         "Skeleton prep",
         "Vessel walls are median-smoothed and opened so edge jaggies cannot become a fur of false spurs when the mask is thinned.",
@@ -277,7 +288,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     spur_len = spur_length_px(skel_src.shape)
     skeleton = clip_skeleton_to_interior(get_skeleton(skel_src), dist)
     skeleton = prune_spurs(skeleton, max_spur_length=spur_len)
-    yield _step(
+    yield from emit_step(
         "skeleton",
         "Skeletonization",
         "The vein mask is thinned to a centerline, clipped off the hand contour, and short fringe twigs are walked off so the graph is not hairy.",
@@ -288,7 +299,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
 
     pruned = drop_short_skeleton_segments(skeleton, min_len=spur_len)
     pruned = clip_skeleton_to_interior(prune_spurs(pruned, max_spur_length=spur_len), dist)
-    yield _step(
+    yield from emit_step(
         "pruned",
         "Spur pruning",
         "Remaining dead-end twigs and isolated specks shorter than the spur cutoff are erased from the graph.",
@@ -301,29 +312,29 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     endpoints = merge_nearby_points(endpoints, pruned.shape, cluster_radius=8)
     branch_points = merge_nearby_points(branch_points, pruned.shape, cluster_radius=8)
 
-    atlas = _draw_landmarks(_render_skeleton(pruned), endpoints, branch_points)
-    yield _step(
-        "landmarks",
-        "Feature landmarks",
-        "Pixels with one neighbor are endpoints (green). Pixels with three or more are bifurcations (red). Nearby detections are merged.",
-        "extract",
-        atlas,
-        "png",
-    )
-
     vein_mask = veins < 128
-    overlay = _overlay(frame, vein_mask, endpoints, branch_points)
-    yield _step(
-        "overlay",
-        "Vein overlay",
-        "The extracted mask and landmarks are composited onto the original photograph so you can judge anatomical fit.",
-        "extract",
-        overlay,
-        "jpg",
-    )
+    if emit_steps:
+        atlas = _draw_landmarks(_render_skeleton(pruned), endpoints, branch_points)
+        yield from emit_step(
+            "landmarks",
+            "Feature landmarks",
+            "Pixels with one neighbor are endpoints (green). Pixels with three or more are bifurcations (red). Nearby detections are merged.",
+            "extract",
+            atlas,
+            "png",
+        )
+        overlay = _overlay(frame, vein_mask, endpoints, branch_points)
+        yield from emit_step(
+            "overlay",
+            "Vein overlay",
+            "The extracted mask and landmarks are composited onto the original photograph so you can judge anatomical fit.",
+            "extract",
+            overlay,
+            "jpg",
+        )
 
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-    yield {
+    features = {
         "type": "features",
         "endpoints": [{"x": int(x), "y": int(y)} for y, x in endpoints],
         "branches": [{"x": int(x), "y": int(y)} for y, x in branch_points],
@@ -336,7 +347,18 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
             "height": h,
             "elapsed_ms": elapsed_ms,
         },
-        "original": encode_image(frame, "jpg"),
-        "overlay": encode_image(overlay, "jpg"),
     }
-    yield {"type": "done", "elapsed_ms": elapsed_ms}
+    if emit_steps:
+        features["original"] = encode_image(frame, "jpg")
+        features["overlay"] = encode_image(overlay, "jpg")
+    yield features
+    if emit_steps:
+        yield {"type": "done", "elapsed_ms": elapsed_ms}
+
+
+def collect_features(frame: np.ndarray, invert: bool = False, filename: str = "upload"):
+    """Run the pipeline and return the features payload without encoding stage images."""
+    for event in iter_analysis(frame, invert=invert, filename=filename, emit_steps=False):
+        if event.get("type") == "features":
+            return event
+    raise RuntimeError("Pipeline did not produce features")

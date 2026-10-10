@@ -33,6 +33,7 @@
 
       <nav class="nav" aria-label="Primary">
         <a class="nav-link is-active" href="#studio" data-page="studio">Studio</a>
+        <a class="nav-link" href="#data" data-page="data">Data</a>
         <a class="nav-link" href="#about" data-page="about">About</a>
       </nav>
 
@@ -192,6 +193,108 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
     </footer>
+
+    <section class="data-page hidden" id="dataPage" hidden>
+      <article class="about-inner about-wide data-inner">
+        <p class="eyebrow">Data</p>
+        <h1>Stored vein features.</h1>
+        <p>
+          Every upload and each built-in sample is saved to a local SQLite database
+          (<code>data/vena.db</code>). Counts, working size, and landmark coordinates
+          stay here so you can compare runs without reprocessing the image.
+        </p>
+
+        <div class="data-toolbar">
+          <div class="explainer-tabs" id="dataViewTabs" role="tablist">
+            <button type="button" class="is-on" data-view="table" role="tab" aria-selected="true">Table</button>
+            <button type="button" data-view="graph" role="tab" aria-selected="false">Graph</button>
+          </div>
+          <div class="explainer-tabs" id="dataSourceTabs">
+            <button type="button" class="is-on" data-source="all">All</button>
+            <button type="button" data-source="sample">Samples</button>
+            <button type="button" data-source="upload">Uploads</button>
+          </div>
+          <div class="data-toolbar-meta">
+            <span id="dataCount">0 analyses</span>
+            <button type="button" class="ghost" id="dataRefresh">Refresh</button>
+          </div>
+        </div>
+
+        <p class="data-banner hidden" id="dataBanner" hidden></p>
+
+        <div id="dataTableView">
+          <div class="data-table-wrap" id="dataTableWrap">
+            <table class="data-table" id="dataTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>File</th>
+                  <th>Source</th>
+                  <th>Invert</th>
+                  <th>Ends</th>
+                  <th>Forks</th>
+                  <th>Skel</th>
+                  <th>Vein</th>
+                  <th>Size</th>
+                  <th>ms</th>
+                  <th>Stored</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="dataTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="hidden" id="dataGraphView" hidden>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <h3>Landmarks by analysis</h3>
+              <p class="chart-sub">Endpoints versus bifurcations stored for each run.</p>
+              <div class="chart-host" id="chartLandmarks"></div>
+            </div>
+            <div class="chart-card">
+              <h3>Mask density</h3>
+              <p class="chart-sub">Skeleton pixels against the thicker vein mask.</p>
+              <div class="chart-host" id="chartPixels"></div>
+            </div>
+            <div class="chart-card">
+              <h3>Pipeline time</h3>
+              <p class="chart-sub">Milliseconds spent extracting features.</p>
+              <div class="chart-host" id="chartTime"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="data-detail hidden" id="dataDetail" hidden>
+          <div class="data-detail-head">
+            <div>
+              <p class="eyebrow" id="detailKicker">Selected run</p>
+              <h2 id="detailTitle">—</h2>
+            </div>
+            <button type="button" class="ghost" id="detailClose">Close</button>
+          </div>
+          <div class="metrics" id="detailMetrics"></div>
+          <div class="detail-split">
+            <div class="chart-card">
+              <h3>Landmark map</h3>
+              <p class="chart-sub">Image coordinates, origin at the top-left.</p>
+              <div class="chart-host scatter-host" id="chartScatter"></div>
+            </div>
+            <div class="detail-points">
+              <div>
+                <p class="col-label">Endpoints</p>
+                <ul id="detailEnds"></ul>
+              </div>
+              <div>
+                <p class="col-label">Bifurcations</p>
+                <ul id="detailBranches"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
 
     <section class="about hidden" id="aboutPage" hidden>
       <article class="about-inner about-wide">
