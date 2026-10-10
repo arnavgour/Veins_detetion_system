@@ -1,10 +1,25 @@
-w# Vena — hand vein detection studio
+# Vena — hand vein detection studio
 
 Vena is a local web app that demonstrates **dorsal hand-vein analysis**. Upload a photograph (PNG, JPG, BMP) or pick a sample. The UI streams every preprocess and feature-extraction stage as the research code runs, then overlays **endpoints** (green) and **bifurcations** (red) on the original hand.
 
 This is a demonstration of the computer-vision pipeline in this repository, **not** a clinical or identity-verification system.
 
 The same process write-up is interactive in the app: **About** (`#about`) is a clickable explorer, and **Studio** shows Why / How / Parameters / What to look for for the stage you are viewing.
+
+## Slide deck
+
+`Vena.pptx` is a 15-slide talk that walks the same sixteen stages. Its look follows the studio UI: warm cream paper, forest green, terracotta for veins, serif headings, rounded cards, and a 16-segment pipeline strip in the footer that tracks the current stage.
+
+| Token | Hex | Used for |
+| --- | --- | --- |
+| Cream | `#EEECE4` | Slide background |
+| Card | `#FBF8F1` | Cards, pills, image frames |
+| Forest | `#235A44` | Eyebrows, logo, completed stages |
+| Forest deep | `#17392B` | Dark slides |
+| Terracotta | `#B5543C` | Vein mask, current stage, accents |
+| Ink | `#1C1A17` | Body text |
+
+Headings use Cambria (Georgia is a fine substitute) and body text uses Calibri, so the deck opens cleanly without extra font installs.
 
 ## Run the studio
 
@@ -37,13 +52,13 @@ upload
   → median 15×15
   → CLAHE
   → median 15×15
-  → adaptive Gaussian threshold
+  → adaptive Gaussian threshold (inside the ROI only)
   → morphological close + open (7×7)
   → drop blobs < 500 px
-  → strip silhouette pixels, then drop border / contour-hugging blobs
+  → drop border-touching + contour-hugging components
   → tighter border pass (margin 1)
   → morphological close + open (5×5)
-  → skeletonize + clip centerlines still on the silhouette
+  → skeletonize
   → prune spurs ≤ 8 px
   → endpoints + bifurcations (merge radius 8)
   → overlay on the original
@@ -67,11 +82,11 @@ Polarity throughout: **dark pixels are veins** (binary value 0 / `< 128`). NIR i
 
 ### 02 — Hand interior ROI
 
-**Why.** Adaptive threshold loves the high-contrast edge where the fist meets the background. That contour often does **not** touch the image frame, so “remove border-touching components” leaves it — and skeletonization traces the **outline of the hand** instead of the veins. Painting the band white *before* thresholding is worse: it draws a new edge, an inset copy of the same outline. Veins live a margin inside the palm.
+**Why.** Adaptive threshold loves the high-contrast edge where the fist meets the background. That contour often does **not** touch the image frame, so “remove border-touching components” leaves it — and skeletonization traces the **outline of the hand** instead of the veins. Veins live a margin inside the palm.
 
-**How.** Otsu-segment the original grayscale, flip polarity so the image center is the hand, keep the largest filled blob, then take a distance transform with a **1 px pad of background** so a hand that fills the crop still has a silhouette. Pixels closer to the background than **max(20, 5.5% of the shorter side)** are the gold band. They are deleted from the **binary mask** later, not from the grayscale.
+**How.** Otsu-segment the original grayscale, flip polarity so the image center is the hand, keep the largest filled blob, then take a distance transform. Pixels closer to the background than **max(16, 4.5% of the shorter side)** are treated as the silhouette band and forced to “not a vein” (intensity 255) before thresholding. After the binary mask is built, any leftover component whose *mean* distance to the background is still small is deleted.
 
-**Look for.** In Studio, the gold rim is ignored on purpose; the green-tinted interior is the search region. The fist or finger outline should not appear in the overlay.
+**Look for.** In Studio, the gold rim is ignored on purpose; the green-tinted interior is the search region. The fist outline should not appear in the overlay.
 
 ---
 
@@ -150,9 +165,9 @@ Polarity throughout: **dark pixels are veins** (binary value 0 / `< 128`). NIR i
 
 ### 10 — Vein mask (border + silhouette)
 
-**Why.** The outline is often **fused** with real veins into one blob. A mean-distance test then keeps the whole thing, including the hand contour. Cutting the silhouette band first disconnects interior vessels from the rim.
+**Why.** The high-contrast edge where the hand meets the background is a thick dark loop. If it stays, skeletonization traces the **palm outline** instead of interior veins.
 
-**How.** `suppress_hand_outline`: set every dark pixel with distance-to-background below the interior margin to 255 (`strip_silhouette_pixels`), then reject components within **3 px** of the frame, then drop leftovers whose mean distance is small or whose pixels are mostly in the band.
+**How.** Invert, label, reject any component whose bounding box lies within **3 px** of the frame border (`remove_border_touching_components`, `border_margin=3`). Invert back.
 
 **Look for.** Outer contour gone. Remaining black strokes on the interior of the palm.
 
@@ -180,11 +195,11 @@ Polarity throughout: **dark pixels are veins** (binary value 0 / `< 128`). NIR i
 
 ### 13 — Skeletonization
 
-**Why.** A thick mask has thousands of pixels; you cannot define “the” endpoint of a 12-pixel-wide blob. Thinning collapses each vessel to its **medial axis**. After this, a neighbor count of 1 vs 3+ is geometric. A last distance clip removes any hairline that still traces the palm edge.
+**Why.** A thick mask has thousands of pixels; you cannot define “the” endpoint of a 12-pixel-wide blob. Thinning collapses each vessel to its **medial axis**. After this, a neighbor count of 1 vs 3+ is geometric.
 
-**How.** Pixels `< 128` are foreground. `skimage.morphology.skeletonize` returns a boolean array (`get_skeleton`). Skeleton pixels whose distance to background is below **~6.2% of the shorter side** are then cleared (`clip_skeleton_to_interior`). The UI draws it as dark lines on paper (slightly dilated for display only).
+**How.** Pixels `< 128` are foreground. `skimage.morphology.skeletonize` returns a boolean array (`get_skeleton`). The UI draws it as dark lines on paper (slightly dilated for display only).
 
-**Look for.** Hairline traces along interior veins only — not the fingers or palm outline. Short noisy twigs are pruned next.
+**Look for.** Hairline traces along the veins, plus short noisy twigs — those are pruned next.
 
 ---
 

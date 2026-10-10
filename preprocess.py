@@ -42,11 +42,7 @@ def interior_margin_px(shape, frac=0.055, min_px=20):
 
 
 def hand_interior_mask(hand_filled, margin=None):
-    """Pixels at least `margin` from the silhouette *and* the image frame.
-
-    The frame is treated as background (1 px pad of zeros) so a hand that
-    fills the crop still has its border-hugging outline excluded.
-    """
+    """Pixels at least `margin` from the silhouette *and* the image frame."""
     if margin is None:
         margin = interior_margin_px(hand_filled.shape)
     h, w = hand_filled.shape[:2]
@@ -68,11 +64,6 @@ def restrict_to_interior(img, interior, fill=255):
 
 
 def strip_silhouette_pixels(binary_img, dist, min_dist=None):
-    """Pixel-level: any dark vein pixel too close to the contour becomes background.
-
-    Component-mean tests fail when the outline is fused with interior veins;
-    this cuts the ring off regardless of connectivity.
-    """
     if dist is None:
         return binary_img
     if min_dist is None:
@@ -85,11 +76,6 @@ def strip_silhouette_pixels(binary_img, dist, min_dist=None):
 
 
 def clip_skeleton_to_interior(skeleton, dist, min_dist=None):
-    """Drop skeleton pixels that still hug the hand outline.
-
-    Uses a slightly larger margin than the binary strip so morphology that
-    grew the rim a few pixels inward cannot reappear as a centerline.
-    """
     if skeleton is None or dist is None:
         return skeleton
     if min_dist is None:
@@ -100,7 +86,6 @@ def clip_skeleton_to_interior(skeleton, dist, min_dist=None):
 
 
 def remove_contour_hugging_components(binary_img, dist, min_mean_dist=None, max_near_frac=0.45):
-    """Drop blobs that live on the silhouette (low mean dist or mostly in the band)."""
     if dist is None:
         return binary_img
     if min_mean_dist is None:
@@ -123,12 +108,7 @@ def remove_contour_hugging_components(binary_img, dist, min_mean_dist=None, max_
 
 
 def suppress_hand_outline(binary_img, interior, dist):
-    """Strip the silhouette band, then drop leftover border / contour blobs.
-
-    Order matters: cutting the outline *before* the border-touching test
-    disconnects interior veins from a rim that reaches the frame, so the
-    real vasculature is not deleted with the outline.
-    """
+    """Strip the silhouette band *before* border cleanup so interior veins survive."""
     veins = strip_silhouette_pixels(binary_img, dist)
     veins = restrict_to_interior(veins, interior, fill=255)
     veins = remove_border_touching_components(veins)
@@ -145,7 +125,10 @@ def render_hand_roi(frame, hand_filled, interior):
     vis[band] = vis[band] * 0.35 + np.array([40, 170, 220], dtype=np.float32) * 0.65
     return np.clip(vis, 0, 255).astype(np.uint8)
 
-def apply_median_filter(gray_img, ksize=15):
+MEDIAN_KSIZE = 5
+
+
+def apply_median_filter(gray_img, ksize=MEDIAN_KSIZE):
     return cv2.medianBlur(gray_img, ksize)
 
 def apply_clahe(img, clip_limit=2.0, tile_grid_size=(8, 8)):
@@ -159,6 +142,41 @@ def apply_adaptive_threshold(img, block_size=29, c=2):
         cv2.THRESH_BINARY,
         block_size, c
     )
+
+
+def shannon_entropy(img):
+    if img.ndim > 2:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    hist = cv2.calcHist([img], [0], None, [256], [0, 256]).ravel()
+    p = hist / max(float(hist.sum()), 1.0)
+    p = p[p > 0]
+    return float(-(p * np.log2(p)).sum())
+
+
+def threshold_loss_report(before, binary, interior=None):
+    if before.ndim > 2:
+        before = cv2.cvtColor(before, cv2.COLOR_BGR2GRAY)
+    dark = binary < 128
+    region = interior > 0 if interior is not None else np.ones(binary.shape, dtype=bool)
+    dark_i = dark & region
+    labeled = np.where(dark_i, 255, 0).astype(np.uint8)
+    num, _, stats, _ = cv2.connectedComponentsWithStats(labeled, connectivity=8)
+    areas = stats[1:, cv2.CC_STAT_AREA] if num > 1 else np.array([], dtype=np.int32)
+    e_in = shannon_entropy(before)
+    e_out = shannon_entropy(binary)
+    palm = max(int(region.sum()), 1)
+    return {
+        "gray_levels_in": int(len(np.unique(before))),
+        "gray_levels_out": 2,
+        "entropy_in": round(e_in, 2),
+        "entropy_out": round(e_out, 2),
+        "entropy_drop_pct": round(100.0 * (1.0 - e_out / max(e_in, 1e-9)), 1),
+        "dark_pct_frame": round(100.0 * float(dark.mean()), 1),
+        "dark_pct_palm": round(100.0 * float(dark_i.sum()) / palm, 1),
+        "components": int(max(num - 1, 0)),
+        "median_blob_px": int(np.median(areas)) if len(areas) else 0,
+        "blobs_ge_500": int((areas >= 500).sum()) if len(areas) else 0,
+    }
 
 def remove_small_blobs(binary_img, min_area=500):
     inverted = cv2.bitwise_not(binary_img)
@@ -207,8 +225,6 @@ def preprocess_pipeline(frame, show_steps=True):
     median = apply_median_filter(gray)
     clahe_img = apply_clahe(median)
     median2 = apply_median_filter(clahe_img)
-    # Do not paint the exterior white before thresholding — that hard edge
-    # is itself detected as a vein and traces an inset copy of the outline.
     thresholded = apply_adaptive_threshold(median2)
     smooth = smooth_binary(thresholded)
     cleaned = remove_small_blobs(smooth)

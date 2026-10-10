@@ -10,11 +10,13 @@ import numpy as np
 
 from features import (
     classify_points,
+    drop_short_skeleton_segments,
     get_skeleton,
     merge_nearby_points,
+    prepare_skeleton_mask,
     prune_spurs,
     remove_border_touching_components as features_remove_border,
-    smooth_binary as features_smooth,
+    spur_length_px,
 )
 from inversionPreProcess import invert_and_grayscale
 from preprocess import (
@@ -28,6 +30,7 @@ from preprocess import (
     segment_hand,
     smooth_binary,
     suppress_hand_outline,
+    threshold_loss_report,
     to_grayscale,
 )
 
@@ -104,8 +107,8 @@ def _overlay(original_bgr: np.ndarray, vein_mask: np.ndarray, endpoints, branch_
     return _draw_landmarks(out, endpoints, branch_points)
 
 
-def _step(step_id, title, description, group, img, fmt="jpg"):
-    return {
+def _step(step_id, title, description, group, img, fmt="jpg", stats=None):
+    event = {
         "type": "step",
         "id": step_id,
         "title": title,
@@ -113,6 +116,9 @@ def _step(step_id, title, description, group, img, fmt="jpg"):
         "group": group,
         "image": encode_image(img, fmt),
     }
+    if stats:
+        event["stats"] = stats
+    return event
 
 
 def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "upload"):
@@ -174,7 +180,7 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     yield _step(
         "median",
         "Median filter",
-        "A wide median blur knocks out sensor grain and pores while keeping the elongated vein edges intact.",
+        "A light 5×5 median knocks out pores and speckle without smearing thin veins.",
         "enhance",
         median,
         "jpg",
@@ -194,20 +200,28 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
     yield _step(
         "median2",
         "Second median pass",
-        "CLAHE amplifies leftover grain, so a second median pass calms the field before thresholding.",
+        "CLAHE amplifies leftover grain, so a second 5×5 median calms the field before thresholding.",
         "enhance",
         median2,
         "jpg",
     )
 
     thresholded = apply_adaptive_threshold(median2)
+    loss = threshold_loss_report(median2, thresholded, interior)
     yield _step(
         "threshold",
         "Adaptive threshold",
-        "Local Gaussian thresholding turns darker-than-neighborhood pixels into a binary vein hypothesis. The hand outline often appears here; it is stripped in the vein-mask stage.",
+        (
+            f"{loss['gray_levels_in']} gray levels collapsed to {loss['gray_levels_out']}; "
+            f"entropy {loss['entropy_in']} → {loss['entropy_out']} bits "
+            f"({loss['entropy_drop_pct']}% of intensity information gone). "
+            f"{loss['dark_pct_palm']}% of the palm is marked vein; a typical island is "
+            f"{loss['median_blob_px']} px. Later stages throw most of that speckle away."
+        ),
         "segment",
         _render_binary(thresholded),
         "png",
+        stats=loss,
     )
 
     smooth = smooth_binary(thresholded)
@@ -250,31 +264,34 @@ def iter_analysis(frame: np.ndarray, invert: bool = False, filename: str = "uplo
         "png",
     )
 
-    skel_src = features_smooth(outlined, kernel_size=5)
+    skel_src = prepare_skeleton_mask(outlined)
     yield _step(
         "skel_prep",
         "Skeleton prep",
-        "A lighter morphological smooth prepares a clean foreground for 1-pixel thinning.",
+        "Vessel walls are median-smoothed and opened so edge jaggies cannot become a fur of false spurs when the mask is thinned.",
         "extract",
         _render_binary(skel_src),
         "png",
     )
 
+    spur_len = spur_length_px(skel_src.shape)
     skeleton = clip_skeleton_to_interior(get_skeleton(skel_src), dist)
+    skeleton = prune_spurs(skeleton, max_spur_length=spur_len)
     yield _step(
         "skeleton",
         "Skeletonization",
-        "The vein mask is thinned to a centerline graph, then any centerline still hugging the hand contour is clipped away.",
+        "The vein mask is thinned to a centerline, clipped off the hand contour, and short fringe twigs are walked off so the graph is not hairy.",
         "extract",
         _render_skeleton(skeleton),
         "png",
     )
 
-    pruned = clip_skeleton_to_interior(prune_spurs(skeleton, max_spur_length=8), dist)
+    pruned = drop_short_skeleton_segments(skeleton, min_len=spur_len)
+    pruned = clip_skeleton_to_interior(prune_spurs(pruned, max_spur_length=spur_len), dist)
     yield _step(
         "pruned",
         "Spur pruning",
-        "Short dead-end twigs (false spurs from noisy borders) are walked back and erased from the graph.",
+        "Remaining dead-end twigs and isolated specks shorter than the spur cutoff are erased from the graph.",
         "extract",
         _render_skeleton(pruned),
         "png",

@@ -29,6 +29,24 @@ def smooth_binary(binary_img, kernel_size=5):
     return cv2.bitwise_not(smoothed)
 
 
+def spur_length_px(shape, frac=0.016, min_px=16, max_px=36):
+    return min(max_px, max(min_px, int(min(shape[:2]) * frac)))
+
+
+def prepare_skeleton_mask(binary_img, kernel_size=9, median_ksize=5, gauss_ksize=7):
+    """Round vessel walls so thinning does not grow a fur of false spurs."""
+    inv = cv2.bitwise_not(binary_img)
+    if median_ksize >= 3:
+        inv = cv2.medianBlur(inv, median_ksize)
+    if gauss_ksize >= 3:
+        blur = cv2.GaussianBlur(inv, (gauss_ksize, gauss_ksize), 0)
+        _, inv = cv2.threshold(blur, 127, 255, cv2.THRESH_BINARY)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    inv = cv2.morphologyEx(inv, cv2.MORPH_OPEN, kernel)
+    inv = cv2.morphologyEx(inv, cv2.MORPH_CLOSE, kernel)
+    return cv2.bitwise_not(inv)
+
+
 def get_skeleton(thresholded_img):
     veins_as_foreground = thresholded_img < 128
     skeleton = skeletonize(veins_as_foreground)
@@ -57,40 +75,55 @@ def classify_points(skeleton):
 
     return endpoints, branch_points
 
-def prune_spurs(skeleton, max_spur_length=8):
-    skeleton = skeleton.copy()
-    neighbor_count = count_neighbors(skeleton)
-    endpoints = [tuple(p) for p in np.argwhere(skeleton & (neighbor_count == 1))]
-
-    for start in endpoints:
-        path = [start]
-        current = start
-        prev = None
-
-        for _ in range(max_spur_length):
-            y, x = current
-            neighbors = []
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    if dy == 0 and dx == 0:
-                        continue
-                    ny, nx = y + dy, x + dx
-                    if 0 <= ny < skeleton.shape[0] and 0 <= nx < skeleton.shape[1]:
-                        if skeleton[ny, nx] and (ny, nx) != prev:
+def prune_spurs(skeleton, max_spur_length=8, max_rounds=6):
+    skeleton = np.asarray(skeleton, dtype=bool).copy()
+    h, w = skeleton.shape
+    for _ in range(max_rounds):
+        neighbor_count = count_neighbors(skeleton)
+        starts = [tuple(p) for p in np.argwhere(skeleton & (neighbor_count == 1))]
+        changed = False
+        for start in starts:
+            if not skeleton[start]:
+                continue
+            path = [start]
+            current = start
+            prev = None
+            hit_junction = False
+            for _step in range(max_spur_length):
+                y, x = current
+                neighbors = []
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dy == 0 and dx == 0:
+                            continue
+                        ny, nx = y + dy, x + dx
+                        if 0 <= ny < h and 0 <= nx < w and skeleton[ny, nx] and (ny, nx) != prev:
                             neighbors.append((ny, nx))
-
-            if len(neighbors) == 0:
-                break
-            if len(neighbors) >= 2:
-                for (py, px) in path:
+                if len(neighbors) == 0:
+                    break
+                if len(neighbors) >= 2:
+                    hit_junction = True
+                    break
+                prev = current
+                current = neighbors[0]
+                path.append(current)
+            if hit_junction:
+                for py, px in path:
                     skeleton[py, px] = False
-                break
-
-            prev = current
-            current = neighbors[0]
-            path.append(current)
-
+                changed = True
+        if not changed:
+            break
     return skeleton
+
+
+def drop_short_skeleton_segments(skeleton, min_len=16):
+    img = (np.asarray(skeleton, dtype=np.uint8) * 255)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(img, connectivity=8)
+    keep = np.zeros(skeleton.shape, dtype=bool)
+    for i in range(1, num):
+        if stats[i, cv2.CC_STAT_AREA] >= min_len:
+            keep[labels == i] = True
+    return keep
 
 def merge_nearby_points(points, image_shape, cluster_radius=8):
     if not points:
@@ -112,18 +145,22 @@ def merge_nearby_points(points, image_shape, cluster_radius=8):
 
     return merged
 
-def extract_feature_points(thresholded_img, max_spur_length=8,
-                           smooth_kernel=5, cluster_radius=8,
+def extract_feature_points(thresholded_img, max_spur_length=None,
+                           smooth_kernel=9, cluster_radius=8,
                            remove_outline=True):
 
     img = thresholded_img
     if remove_outline:
         img = remove_border_touching_components(img)
 
-    img = smooth_binary(img, kernel_size=smooth_kernel)
+    img = prepare_skeleton_mask(img, kernel_size=smooth_kernel)
+
+    if max_spur_length is None:
+        max_spur_length = spur_length_px(img.shape)
 
     skeleton = get_skeleton(img)
     skeleton = prune_spurs(skeleton, max_spur_length=max_spur_length)
+    skeleton = drop_short_skeleton_segments(skeleton, min_len=max_spur_length)
 
     endpoints, branch_points = classify_points(skeleton)
 

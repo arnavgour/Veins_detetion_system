@@ -42,6 +42,8 @@ const els = {
   stepKicker: document.getElementById("stepKicker"),
   stepTitle: document.getElementById("stepTitle"),
   stepCopy: document.getElementById("stepCopy"),
+  stepStats: document.getElementById("stepStats"),
+  lossTab: document.getElementById("lossTab"),
   stageImage: document.getElementById("stageImage"),
   compare: document.getElementById("compare"),
   compareClip: document.getElementById("compareClip"),
@@ -213,6 +215,7 @@ function renderStage() {
   els.stepKicker.textContent = `${GROUPS[step.group] || step.group} · ${pad(state.active + 1)} / ${pad(total)}`;
   els.stepTitle.textContent = step.title;
   els.stepCopy.textContent = step.description;
+  renderStepStats(step.stats);
   els.stageImage.src = step.image;
   els.prevBtn.disabled = state.active === 0;
   els.nextBtn.disabled = state.active === total - 1;
@@ -236,7 +239,41 @@ function renderStage() {
 }
 
 function updateCompare(value) {
-  els.compare.style.setProperty("--split", `${Number(value)}%`);
+  const pct = Math.min(100, Math.max(0, Number(value)));
+  els.compareRange.value = String(pct);
+  els.compare.style.setProperty("--split", `${pct}%`);
+}
+
+function splitFromClientX(clientX) {
+  const rect = els.compare.getBoundingClientRect();
+  if (!rect.width) return Number(els.compareRange.value);
+  return ((clientX - rect.left) / rect.width) * 100;
+}
+
+function renderStepStats(stats) {
+  if (!els.stepStats) return;
+  const has = Boolean(stats);
+  if (els.lossTab) els.lossTab.hidden = !has;
+  if (!has) {
+    els.stepStats.hidden = true;
+    els.stepStats.classList.add("hidden");
+    els.stepStats.innerHTML = "";
+    if (state.explainerTab === "loss") state.explainerTab = "why";
+    return;
+  }
+  els.stepStats.hidden = false;
+  els.stepStats.classList.remove("hidden");
+  const chips = [
+    [`${stats.entropy_drop_pct}%`, "Entropy gone"],
+    [`${stats.gray_levels_in}→${stats.gray_levels_out}`, "Gray levels"],
+    [`${stats.entropy_in}→${stats.entropy_out}`, "Bits / pixel"],
+    [`${stats.dark_pct_palm}%`, "Palm marked vein"],
+    [`${stats.median_blob_px} px`, "Typical blob"],
+    [Number(stats.components).toLocaleString(), "Islands"],
+  ];
+  els.stepStats.innerHTML = chips
+    .map(([value, label]) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`)
+    .join("");
 }
 
 function renderFacts() {
@@ -399,6 +436,15 @@ els.downloadBtn.addEventListener("click", () => {
 });
 
 els.compareRange.addEventListener("input", (e) => updateCompare(e.target.value));
+els.compare.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  els.compare.setPointerCapture(e.pointerId);
+  updateCompare(splitFromClientX(e.clientX));
+});
+els.compare.addEventListener("pointermove", (e) => {
+  if (!els.compare.hasPointerCapture(e.pointerId)) return;
+  updateCompare(splitFromClientX(e.clientX));
+});
 els.sliderToggle.addEventListener("change", renderStage);
 
 window.addEventListener("keydown", (e) => {
@@ -471,6 +517,7 @@ function renderExplainer() {
     btn.setAttribute("aria-selected", on ? "true" : "false");
   });
   const tab = state.explainerTab;
+  const stats = step.stats;
   if (tab === "params") {
     els.explainerBody.innerHTML = `<ul class="params">${guide.params
       .map((p) => `<li><strong>${p.name}:</strong> ${p.value} <em>(${p.note})</em></li>`)
@@ -479,6 +526,15 @@ function renderExplainer() {
     els.explainerBody.textContent = guide.how;
   } else if (tab === "look") {
     els.explainerBody.textContent = guide.look;
+  } else if (tab === "loss" && stats) {
+    els.explainerBody.innerHTML = `<p>Adaptive threshold is a 1-bit quantizer. Anything only <strong>C = 2</strong> gray levels darker than its neighborhood becomes black — including CLAHE grain.</p>
+      <ul class="params">
+        <li><strong>Gray levels:</strong> ${stats.gray_levels_in} → ${stats.gray_levels_out}</li>
+        <li><strong>Entropy:</strong> ${stats.entropy_in} → ${stats.entropy_out} bits/px (${stats.entropy_drop_pct}% gone)</li>
+        <li><strong>Palm marked vein:</strong> ${stats.dark_pct_palm}%</li>
+        <li><strong>Connected islands:</strong> ${Number(stats.components).toLocaleString()} (median ${stats.median_blob_px} px)</li>
+        <li><strong>Islands ≥ 500 px:</strong> ${stats.blobs_ge_500}</li>
+      </ul>`;
   } else {
     els.explainerBody.textContent = guide.why;
   }

@@ -16,7 +16,7 @@ def invert_and_grayscale(frame):
         return cv2.cvtColor(inverted, cv2.COLOR_BGR2GRAY)
     return inverted
 
-def apply_median_filter(gray_img, ksize=15):
+def apply_median_filter(gray_img, ksize=5):
     return cv2.medianBlur(gray_img, ksize)
 
 def apply_clahe(img, clip_limit=2.0, tile_grid_size=(8, 8)):
