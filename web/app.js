@@ -429,14 +429,28 @@ els.downloadBtn.addEventListener("click", () => {
 });
 
 els.compareRange.addEventListener("input", (e) => updateCompare(e.target.value));
+let comparePointer = null;
+els.compare.addEventListener("dragstart", (e) => e.preventDefault());
 els.compare.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
-  els.compare.setPointerCapture(e.pointerId);
+  e.preventDefault();
+  comparePointer = e.pointerId;
+  try {
+    els.compare.setPointerCapture(e.pointerId);
+  } catch {
+    /* capture is optional; the flag keeps the drag alive */
+  }
   updateCompare(splitFromClientX(e.clientX));
 });
 els.compare.addEventListener("pointermove", (e) => {
-  if (!els.compare.hasPointerCapture(e.pointerId)) return;
+  if (comparePointer !== e.pointerId) return;
+  e.preventDefault();
   updateCompare(splitFromClientX(e.clientX));
+});
+["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => {
+  els.compare.addEventListener(type, (e) => {
+    if (comparePointer === e.pointerId) comparePointer = null;
+  });
 });
 els.sliderToggle.addEventListener("change", renderStage);
 

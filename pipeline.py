@@ -26,23 +26,12 @@ from preprocess import (
     clip_skeleton_to_interior,
     hand_interior_mask,
     remove_small_blobs,
+    render_hand_roi,
     segment_hand,
     smooth_binary,
     suppress_hand_outline,
     to_grayscale,
 )
-
-STUDIO_STEPS = {
-    "original",
-    "median",
-    "clahe",
-    "median2",
-    "threshold",
-    "mask",
-    "skeleton",
-    "landmarks",
-    "overlay",
-}
 
 MAX_SIDE = 1400
 
@@ -142,9 +131,9 @@ def iter_analysis(
     frame = maybe_resize(frame)
     h, w = frame.shape[:2]
 
-    def emit_step(step_id, *args, **kwargs):
-        if emit_steps and step_id in STUDIO_STEPS:
-            yield _step(step_id, *args, **kwargs)
+    def emit_step(*args, **kwargs):
+        if emit_steps:
+            yield _step(*args, **kwargs)
 
     if emit_steps:
         yield {
@@ -167,11 +156,35 @@ def iter_analysis(
     native_gray = to_grayscale(frame)
     hand = segment_hand(native_gray)
     interior, dist = hand_interior_mask(hand)
+    yield from emit_step(
+        "hand",
+        "Hand interior ROI",
+        "The palm is segmented and a band along the silhouette is excluded so the hand outline cannot be mistaken for a vessel.",
+        "capture",
+        render_hand_roi(frame, hand, interior) if emit_steps else frame,
+        "jpg",
+    )
 
     if invert:
         gray = invert_and_grayscale(frame)
+        yield from emit_step(
+            "gray",
+            "Invert + grayscale",
+            "Colors are inverted so bright NIR veins become dark, then reduced to one intensity channel.",
+            "enhance",
+            gray,
+            "jpg",
+        )
     else:
         gray = native_gray
+        yield from emit_step(
+            "gray",
+            "Grayscale",
+            "Color is discarded so contrast is driven only by intensity.",
+            "enhance",
+            gray,
+            "jpg",
+        )
 
     median = apply_median_filter(gray)
     yield from emit_step(
@@ -214,8 +227,24 @@ def iter_analysis(
     )
 
     smooth = smooth_binary(thresholded)
+    yield from emit_step(
+        "smooth",
+        "Morphological smooth",
+        "Closing then opening with an elliptical kernel bridges small gaps and erases speckle.",
+        "segment",
+        _render_binary(smooth),
+        "png",
+    )
 
     cleaned = remove_small_blobs(smooth)
+    yield from emit_step(
+        "blobs",
+        "Blob filter",
+        "Connected components below the area cutoff are dropped so pores and noise never become veins.",
+        "segment",
+        _render_binary(cleaned),
+        "png",
+    )
 
     veins = suppress_hand_outline(cleaned, interior, dist)
     yield from emit_step(
@@ -228,21 +257,45 @@ def iter_analysis(
     )
 
     outlined = features_remove_border(veins)
+    yield from emit_step(
+        "outline",
+        "Outline isolation",
+        "A tighter border pass removes any silhouette still clinging to the mask.",
+        "extract",
+        _render_binary(outlined),
+        "png",
+    )
 
     skel_src = prepare_skeleton_mask(outlined)
+    yield from emit_step(
+        "skel_prep",
+        "Skeleton prep",
+        "Vessel walls are smoothed so edge jaggies do not become false spurs when the mask is thinned.",
+        "extract",
+        _render_binary(skel_src),
+        "png",
+    )
 
     spur_len = spur_length_px(skel_src.shape)
     skeleton = clip_skeleton_to_interior(get_skeleton(skel_src), dist)
     skeleton = prune_spurs(skeleton, max_spur_length=spur_len)
+    yield from emit_step(
+        "skeleton",
+        "Skeletonization",
+        "The vein mask is thinned to a centerline and clipped off the hand contour.",
+        "extract",
+        _render_skeleton(skeleton) if emit_steps else skeleton,
+        "png",
+    )
 
     pruned = drop_short_skeleton_segments(skeleton, min_len=spur_len)
     pruned = clip_skeleton_to_interior(prune_spurs(pruned, max_spur_length=spur_len), dist)
     yield from emit_step(
-        "skeleton",
-        "Skeleton",
-        "Centerlines after spur pruning — the graph used for endpoints and bifurcations.",
+        "pruned",
+        "Spur pruning",
+        "Dead-end twigs and specks shorter than the spur cutoff are erased from the graph.",
         "extract",
-        _render_skeleton(pruned),
+        _render_skeleton(pruned) if emit_steps else pruned,
         "png",
     )
 
@@ -265,7 +318,7 @@ def iter_analysis(
         yield from emit_step(
             "overlay",
             "Overlay",
-            "Mask and landmarks on the original. Use Compare to wipe between the two.",
+            "Mask and landmarks on the original photograph. Use Compare to wipe between the two.",
             "extract",
             overlay,
             "jpg",

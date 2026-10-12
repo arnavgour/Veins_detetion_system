@@ -95,15 +95,10 @@
             with each frame shown as it is produced.
           </p>
           <ol class="flow">
-            <li><a href="#about/original"><span>01</span>Original</a></li>
-            <li><a href="#about/median"><span>02</span>Median</a></li>
-            <li><a href="#about/clahe"><span>03</span>Enhance</a></li>
-            <li><a href="#about/median2"><span>04</span>Median</a></li>
-            <li><a href="#about/threshold"><span>05</span>Threshold</a></li>
-            <li><a href="#about/mask"><span>06</span>Mask</a></li>
-            <li><a href="#about/skeleton"><span>07</span>Skeleton</a></li>
-            <li><a href="#about/landmarks"><span>08</span>Landmarks</a></li>
-            <li><a href="#about/overlay"><span>09</span>Overlay</a></li>
+            <li><a href="#about/clahe"><span>01</span>Enhance</a></li>
+            <li><a href="#about/threshold"><span>02</span>Segment</a></li>
+            <li><a href="#about/skeleton"><span>03</span>Skeleton</a></li>
+            <li><a href="#about/landmarks"><span>04</span>Landmarks</a></li>
           </ol>
         </div>
 
@@ -125,9 +120,9 @@
           <div class="viewport" id="viewport">
             <img id="stageImage" alt="Current processing stage" />
             <div class="compare hidden" id="compare">
-              <img id="compareBase" alt="Vein overlay" />
+              <img id="compareBase" alt="Vein overlay" draggable="false" />
               <div class="compare-clip" id="compareClip">
-                <img id="compareTop" alt="Original photograph" />
+                <img id="compareTop" alt="Original photograph" draggable="false" />
               </div>
               <span class="compare-handle" id="compareHandle" aria-hidden="true"></span>
               <input type="range" id="compareRange" min="0" max="100" value="52" aria-label="Compare original and overlay" />

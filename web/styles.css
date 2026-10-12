@@ -688,6 +688,8 @@ a.ghost {
   --split: 52%;
   touch-action: none;
   cursor: ew-resize;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .compare img {
@@ -699,6 +701,9 @@ a.ghost {
   max-height: none;
   object-fit: contain;
   box-shadow: none;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .compare-clip {
