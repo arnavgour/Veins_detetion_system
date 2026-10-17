@@ -6,21 +6,6 @@ This is a demonstration of the computer-vision pipeline in this repository, **no
 
 The same process write-up is interactive in the app: **About** (`#about`) is a clickable explorer, and **Studio** shows Why / How / Parameters / What to look for for the stage you are viewing.
 
-## Slide deck
-
-`Vena.pptx` is a 15-slide talk that walks the same sixteen stages. Its look follows the studio UI: warm cream paper, forest green, terracotta for veins, serif headings, rounded cards, and a 16-segment pipeline strip in the footer that tracks the current stage.
-
-| Token | Hex | Used for |
-| --- | --- | --- |
-| Cream | `#EEECE4` | Slide background |
-| Card | `#FBF8F1` | Cards, pills, image frames |
-| Forest | `#235A44` | Eyebrows, logo, completed stages |
-| Forest deep | `#17392B` | Dark slides |
-| Terracotta | `#B5543C` | Vein mask, current stage, accents |
-| Ink | `#1C1A17` | Body text |
-
-Headings use Cambria (Georgia is a fine substitute) and body text uses Calibri, so the deck opens cleanly without extra font installs.
-
 ## Run the studio
 
 ```bash
